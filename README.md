@@ -1,4 +1,4 @@
-# Arduino Compiler API
+# Derivative Server Side Compiler.
 
 A Dockerized REST API server that compiles Arduino C++ sketches remotely and returns ready-to-flash firmware binaries. Built with Go, powered by [arduino-cli](https://arduino.github.io/arduino-cli/), and packaged in Docker with pre-installed board cores — users don't need to install any Arduino toolchain locally.
 
@@ -61,8 +61,8 @@ Submit raw `.ino` code and a target board, get back a compiled `.hex` (AVR) or `
 
 ```bash
 # Clone the repository
-git clone https://github.com/derivative-cli/arduino-compiler.git
-cd arduino-compiler
+git clone https://github.com/ByapakSigdel/derivative-cli/
+cd derivative-cli
 
 # Build and start (first build takes ~10-15 min for board core downloads)
 docker compose up --build
