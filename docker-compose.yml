@@ -1,0 +1,80 @@
+# =============================================================================
+# Arduino Compiler API — Docker Compose Configuration
+# =============================================================================
+#
+# Usage:
+#   docker compose up --build        # Build and start the server
+#   docker compose up -d             # Start in detached mode
+#   docker compose logs -f           # View logs
+#   docker compose down              # Stop and remove containers
+#
+# The server will be available at http://localhost:8080
+#
+# Test with:
+#   curl http://localhost:8080/health
+#   curl http://localhost:8080/api/boards
+#   curl -X POST http://localhost:8080/api/compile \
+#     -H "Content-Type: application/json" \
+#     -d '{"code":"void setup(){} void loop(){}","board":"arduino:avr:uno"}' \
+#     --output sketch.hex
+# =============================================================================
+
+services:
+  arduino-compiler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: arduino-compiler
+    ports:
+      - "8080:8080"
+    environment:
+      # Server port (must match the port mapping above).
+      - PORT=8080
+
+      # Maximum number of simultaneous compilations.
+      # Increase if the server has more CPU/RAM available.
+      - MAX_CONCURRENT_COMPILATIONS=5
+
+      # Per-compilation timeout in seconds.
+      # ESP32 compilations can be slow; 120s is generous.
+      - COMPILE_TIMEOUT=120
+
+      # Rate limit: max requests per minute per IP address.
+      - RATE_LIMIT_RPM=10
+
+      # Maximum request body size in bytes (1 MB).
+      - MAX_REQUEST_SIZE=1048576
+
+      # CORS: comma-separated list of allowed origins, or "*" for all.
+      - ALLOWED_ORIGINS=*
+
+      # Trust proxy headers (X-Forwarded-For, X-Real-IP) for client IP detection.
+      # Set to "true" when behind a reverse proxy (nginx, Cloudflare, etc.).
+      # Default: false (uses direct TCP connection address).
+      - TRUST_PROXY=false
+    restart: unless-stopped
+
+    # Resource limits to prevent runaway compilations from consuming all host resources.
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 4G
+        reservations:
+          cpus: "1.0"
+          memory: 1G
+
+    # Healthcheck is also defined in the Dockerfile, but can be overridden here.
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # Logging configuration to prevent unbounded log growth.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

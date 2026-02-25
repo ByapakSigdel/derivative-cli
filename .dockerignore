@@ -1,0 +1,34 @@
+# =============================================================================
+# .dockerignore — Files excluded from the Docker build context
+# =============================================================================
+# Excluding unnecessary files reduces build context size and speeds up builds.
+
+# Version control
+.git
+.gitignore
+
+# IDE/Editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in the image)
+*.md
+LICENSE
+
+# Docker files (prevent recursive builds)
+docker-compose*.yml
+
+# Test artifacts
+coverage.out
+*.test
+
+# Local environment files
+.env
+.env.*
