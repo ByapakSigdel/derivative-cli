@@ -32,12 +32,12 @@ services:
       - PORT=8080
 
       # Maximum number of simultaneous compilations.
-      # Increase if the server has more CPU/RAM available.
-      - MAX_CONCURRENT_COMPILATIONS=5
+      # Keep low on resource-constrained VPS (1GB RAM).
+      - MAX_CONCURRENT_COMPILATIONS=1
 
       # Per-compilation timeout in seconds.
-      # ESP32 compilations can be slow; 120s is generous.
-      - COMPILE_TIMEOUT=120
+      # ESP32 compilations can be slow on low-resource VPS; 180s is safe.
+      - COMPILE_TIMEOUT=180
 
       # Rate limit: max requests per minute per IP address.
       - RATE_LIMIT_RPM=10
@@ -54,15 +54,16 @@ services:
       - TRUST_PROXY=false
     restart: unless-stopped
 
-    # Resource limits to prevent runaway compilations from consuming all host resources.
+    # Resource limits tuned for a 1GB RAM VPS.
+    # The OS and Docker daemon need ~200-300MB, leaving ~700-800MB for the container.
     deploy:
       resources:
         limits:
-          cpus: "4.0"
-          memory: 4G
-        reservations:
           cpus: "1.0"
-          memory: 1G
+          memory: 768M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
 
     # Healthcheck is also defined in the Dockerfile, but can be overridden here.
     healthcheck:
