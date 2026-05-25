@@ -64,5 +64,42 @@ echo ""
 echo "=== Installed Cores ==="
 "$CLI" core list
 
+# ---------------------------------------------------------------------------
+# External Arduino libraries.
+#
+# The visual editor can emit sketches that #include these. arduino-cli's
+# `compile` automatically picks up libraries installed here (into the user
+# libraries dir), so baking them into the image means library-dependent
+# sketches compile with no per-request network installs.
+#
+# This list MUST stay in sync with requiredCliLibraries() in
+# Derivative/lib/blocks/libraryRegistry.ts. If you add a block that needs a
+# new library, add its arduino-cli name here too.
+#
+# Built-in (ship with the core, NOT installed here): Servo, Wire,
+# SoftwareSerial.
 echo ""
-echo "=== Core installation complete ==="
+echo "--- Updating library index ---"
+"$CLI" lib update-index
+
+echo ""
+echo "--- Installing external libraries ---"
+# Adafruit DHT (+ its Unified Sensor dependency).
+"$CLI" lib install "DHT sensor library"
+"$CLI" lib install "Adafruit Unified Sensor"
+# 16x2 I2C LCD.
+"$CLI" lib install "LiquidCrystal I2C"
+# OLED SSD1306 (+ GFX; BusIO is pulled in as a dependency).
+"$CLI" lib install "Adafruit GFX Library"
+"$CLI" lib install "Adafruit SSD1306"
+# GPS (NEO-6M / NEO-8M).
+"$CLI" lib install "TinyGPSPlus"
+# MPU6050 accelerometer + gyroscope (Electronic Cats).
+"$CLI" lib install "MPU6050"
+
+echo ""
+echo "=== Installed Libraries ==="
+"$CLI" lib list
+
+echo ""
+echo "=== Core + library installation complete ==="
