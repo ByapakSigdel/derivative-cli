@@ -2,24 +2,24 @@
 # Arduino Compiler API — Multi-Stage Dockerfile (Optimized for low-resource VPS)
 # =============================================================================
 #
-# This Dockerfile builds the Arduino compiler API server in two stages:
-#
 # Stage 1 (builder): Compiles the Go binary using the official Go image.
-# Stage 2 (runtime): Sets up a Debian-based image with arduino-cli and the
-#                     pre-compiled Go binary. Board cores are installed at
-#                     build time so they're baked into the image.
+# Stage 2 (runtime): Debian + arduino-cli + the Go binary. NOTHING heavy is
+#                     baked in — board cores and libraries are NOT installed
+#                     at build time.
+#
+# Why: the AVR + ESP32 + ESP8266 cores total several GB extracted. Baking
+# them into image layers made the image enormous and the build/unpack ran
+# out of disk on small hosts ("no space left on device" while extracting the
+# ESP32 RISC-V toolchain). Instead, cores + libraries are provisioned at
+# RUNTIME into a persistent Docker volume on first start (see
+# docker-entrypoint.sh + install-cores.sh). The image stays tiny, the heavy
+# downloads happen once and live on disk, and they survive image rebuilds.
 #
 # Build:
 #   docker build -t arduino-compiler .
 #
-# Run:
-#   docker run -p 8080:8080 arduino-compiler
-#
-# Optimizations applied to reduce image size from ~1.2GB to ~400-500MB:
-# - Removed debug tools (GDB, openocd) not needed for compilation
-# - Removed unused docs, examples, and test files from cores
-# - Moved arduino data via mv instead of cp to avoid duplication during build
-# - Combined RUN layers to reduce intermediate layer sizes
+# Run (mount a volume so cores persist — see docker-compose.yml):
+#   docker run -p 8080:8080 -v arduino_data:/home/appuser/.arduino15 arduino-compiler
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -47,14 +47,15 @@ RUN CGO_ENABLED=0 go build \
 # ---------------------------------------------------------------------------
 FROM debian:bookworm-slim
 
-# Create non-root user early so we can install cores directly into their home.
+# Create non-root user. Cores get provisioned into this user's home at
+# runtime (onto a mounted volume), so nothing heavy lives in the image.
 RUN useradd --create-home --shell /bin/bash appuser
 
-# Install runtime dependencies, arduino-cli, cores, and clean up — all in one
-# layer to minimize image size and avoid large intermediate layers.
-# python3 is required by ESP32/ESP8266 build tools.
-# git is required by some library managers.
-COPY scripts/install-cores.sh /tmp/install-cores.sh
+# Install runtime deps + arduino-cli only. No cores, no libraries — those
+# are downloaded at first start by docker-entrypoint.sh.
+# python3 is required by ESP32/ESP8266 build tools; git by some lib managers.
+COPY scripts/install-cores.sh /usr/local/bin/install-cores.sh
+COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         curl \
@@ -63,34 +64,15 @@ RUN apt-get update && \
         python3-serial \
         git \
     && rm -rf /var/lib/apt/lists/* \
-    # Install arduino-cli
+    # Install arduino-cli.
     && curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | \
        BINDIR=/usr/local/bin sh \
     && arduino-cli version \
-    # Install board cores
-    && chmod +x /tmp/install-cores.sh && /tmp/install-cores.sh && rm /tmp/install-cores.sh \
-    # -----------------------------------------------------------------------
-    # Remove debug tools (GDB, openocd, etc.) — not needed for compilation.
-    # These are the biggest space offenders (~200-300MB).
-    # The error "no space left on device" specifically pointed to
-    # xtensa-esp-elf-gdb which is ~150MB alone.
-    # -----------------------------------------------------------------------
-    && find /root/.arduino15/packages -type f -name "*gdb*" -delete \
-    && find /root/.arduino15/packages -type d -name "*gdb*" -exec rm -rf {} + 2>/dev/null || true \
-    && find /root/.arduino15/packages -type d -name "*openocd*" -exec rm -rf {} + 2>/dev/null || true \
-    # Remove DFU tools (device firmware upgrade via USB — not needed for compilation)
-    && find /root/.arduino15/packages -type d -name "*dfu*" -exec rm -rf {} + 2>/dev/null || true \
-    # Remove documentation, examples, and test files from cores
-    && find /root/.arduino15/packages -type d -name "doc" -exec rm -rf {} + 2>/dev/null || true \
-    && find /root/.arduino15/packages -type d -name "docs" -exec rm -rf {} + 2>/dev/null || true \
-    && find /root/.arduino15/packages -type d -name "examples" -exec rm -rf {} + 2>/dev/null || true \
-    && find /root/.arduino15/packages -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true \
-    && find /root/.arduino15/packages -type d -name "test" -exec rm -rf {} + 2>/dev/null || true \
-    && find /root/.arduino15/packages -type d -name "share" -exec rm -rf {} + 2>/dev/null || true \
-    # Remove debug symbols and static libraries we don't need
-    && find /root/.arduino15/packages -name "*.a" -path "*/lib/lib*.a" -size +5M -delete 2>/dev/null || true \
-    # Move (not copy) arduino data to appuser home to avoid duplication
-    && mv /root/.arduino15 /home/appuser/.arduino15 \
+    && chmod +x /usr/local/bin/install-cores.sh /usr/local/bin/docker-entrypoint.sh \
+    # Pre-create the data dir owned by appuser. When a fresh named volume is
+    # mounted here, Docker seeds it with this dir's ownership, so the runtime
+    # provisioning (running as appuser) can write into the volume.
+    && mkdir -p /home/appuser/.arduino15 \
     && chown -R appuser:appuser /home/appuser/.arduino15
 
 # Copy the compiled Go binary from the builder stage.
@@ -105,9 +87,10 @@ WORKDIR /home/appuser
 
 EXPOSE 8080
 
-# Health check using the Go binary's built-in wget-style check avoids needing curl at runtime,
-# but since curl is already installed, we keep it simple.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+# Generous start period: the first boot provisions cores (a multi-GB,
+# multi-minute download) before the server starts serving. Subsequent boots
+# find the volume already provisioned and start in seconds.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=900s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
-ENTRYPOINT ["arduino-compiler"]
+ENTRYPOINT ["docker-entrypoint.sh"]

@@ -1,10 +1,17 @@
 #!/bin/bash
 # install-cores.sh
 #
-# This script is executed during the Docker image build to pre-install
-# Arduino board cores. By baking the cores into the image, we avoid
-# downloading them at runtime, which would be slow and require internet
-# access from the container.
+# Provisions Arduino board cores + external libraries into the arduino-cli
+# data directory. This runs at RUNTIME (via docker-entrypoint.sh) the first
+# time the container starts, writing into a persistent Docker volume — NOT
+# baked into the image.
+#
+# Why runtime instead of build time: the three cores (AVR + ESP32 + ESP8266)
+# total several GB once extracted. Baking them into image layers made the
+# image huge and the build/unpack ran out of disk on small hosts ("no space
+# left on device" while extracting the ESP32 RISC-V toolchain). Living on a
+# volume keeps the image tiny, downloads the cores exactly once, and they
+# survive image rebuilds.
 #
 # The cores installed here must match the supported boards defined in
 # internal/compiler/compiler.go.
@@ -13,11 +20,13 @@
 #   ./scripts/install-cores.sh
 #
 # Environment:
-#   ARDUINO_CLI_PATH — Path to arduino-cli binary (default: arduino-cli)
+#   ARDUINO_CLI_PATH  — Path to arduino-cli binary (default: arduino-cli)
+#   ARDUINO_DATA_DIR  — arduino-cli data dir for pruning (default: ~/.arduino15)
 
 set -euo pipefail
 
 CLI="${ARDUINO_CLI_PATH:-arduino-cli}"
+DATA_DIR="${ARDUINO_DATA_DIR:-$HOME/.arduino15}"
 
 echo "=== Arduino Core Installation ==="
 echo "Using arduino-cli at: $(which "$CLI")"
@@ -84,22 +93,52 @@ echo "--- Updating library index ---"
 
 echo ""
 echo "--- Installing external libraries ---"
+# Each install is best-effort: one library being temporarily unavailable
+# (or a slightly renamed index entry) shouldn't abort the whole provision
+# and leave the cores half-done. Missing libs just mean the matching block
+# won't compile until fixed.
+install_lib() {
+  "$CLI" lib install "$1" || echo "[warn] failed to install library: $1"
+}
 # Adafruit DHT (+ its Unified Sensor dependency).
-"$CLI" lib install "DHT sensor library"
-"$CLI" lib install "Adafruit Unified Sensor"
+install_lib "DHT sensor library"
+install_lib "Adafruit Unified Sensor"
 # 16x2 I2C LCD.
-"$CLI" lib install "LiquidCrystal I2C"
+install_lib "LiquidCrystal I2C"
 # OLED SSD1306 (+ GFX; BusIO is pulled in as a dependency).
-"$CLI" lib install "Adafruit GFX Library"
-"$CLI" lib install "Adafruit SSD1306"
+install_lib "Adafruit GFX Library"
+install_lib "Adafruit SSD1306"
 # GPS (NEO-6M / NEO-8M).
-"$CLI" lib install "TinyGPSPlus"
+install_lib "TinyGPSPlus"
 # MPU6050 accelerometer + gyroscope (Electronic Cats).
-"$CLI" lib install "MPU6050"
+install_lib "MPU6050"
 
 echo ""
 echo "=== Installed Libraries ==="
 "$CLI" lib list
 
+# ---------------------------------------------------------------------------
+# Prune the data dir to keep the volume small. Removes things never needed
+# for compilation (debuggers, on-chip-flash tools, docs/examples, oversized
+# static libs) and the downloaded archives + caches (the single biggest
+# reclaim — these are only needed during install).
+# ---------------------------------------------------------------------------
 echo ""
-echo "=== Core + library installation complete ==="
+echo "--- Pruning unused toolchain pieces ---"
+if [ -d "$DATA_DIR/packages" ]; then
+  find "$DATA_DIR/packages" -type f -name "*gdb*" -delete 2>/dev/null || true
+  find "$DATA_DIR/packages" -type d -name "*gdb*" -exec rm -rf {} + 2>/dev/null || true
+  find "$DATA_DIR/packages" -type d -name "*openocd*" -exec rm -rf {} + 2>/dev/null || true
+  find "$DATA_DIR/packages" -type d -name "*dfu*" -exec rm -rf {} + 2>/dev/null || true
+  for d in doc docs examples tests test share; do
+    find "$DATA_DIR/packages" -type d -name "$d" -exec rm -rf {} + 2>/dev/null || true
+  done
+  find "$DATA_DIR/packages" -name "*.a" -path "*/lib/lib*.a" -size +5M -delete 2>/dev/null || true
+fi
+
+echo "--- Clearing download cache + staging archives ---"
+"$CLI" cache clean 2>/dev/null || true
+rm -rf "$DATA_DIR/staging" "$DATA_DIR/tmp" 2>/dev/null || true
+
+echo ""
+echo "=== Provisioning complete ==="

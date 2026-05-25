@@ -27,6 +27,15 @@ services:
     container_name: arduino-compiler
     ports:
       - "8080:8080"
+
+    # Persist the arduino-cli data dir (board cores + libraries) on a named
+    # volume. Cores are downloaded here once on first start instead of being
+    # baked into the image — that's what keeps the image small and stops the
+    # build running out of disk. The volume survives `down`/rebuilds, so the
+    # multi-GB download only ever happens once.
+    volumes:
+      - arduino_data:/home/appuser/.arduino15
+
     environment:
       # Server port (must match the port mapping above).
       - PORT=8080
@@ -71,7 +80,10 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      # First boot provisions cores into the volume (a multi-minute download)
+      # before the server serves, so the start period is generous. Later
+      # boots reuse the volume and come up in seconds.
+      start_period: 900s
 
     # Logging configuration to prevent unbounded log growth.
     logging:
@@ -79,3 +91,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+# Named volume holding the arduino-cli data dir (cores + libraries). Lives on
+# the host's docker volume storage, not in the image, so rebuilds are cheap
+# and the cores download only once.
+volumes:
+  arduino_data:

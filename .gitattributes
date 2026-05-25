@@ -1,0 +1,4 @@
+# Shell scripts must use LF endings — they run inside the Linux container,
+# where a CRLF shebang (`#!/bin/bash\r`) breaks with "no such file". Force
+# LF on checkout regardless of the contributor's OS or git autocrlf setting.
+*.sh text eol=lf
