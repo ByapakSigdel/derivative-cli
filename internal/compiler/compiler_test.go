@@ -17,7 +17,7 @@ func TestCompileValidation(t *testing.T) {
 		CompileTimeout:            30 * time.Second,
 		ArduinoCLIPath:            "arduino-cli",
 	}
-	comp := New(cfg)
+	comp := New(cfg, nil)
 	ctx := context.Background()
 
 	t.Run("empty code returns validation error", func(t *testing.T) {
@@ -105,7 +105,7 @@ func TestSemaphoreCapacity(t *testing.T) {
 		CompileTimeout:            5 * time.Second,
 		ArduinoCLIPath:            "false", // "false" is a valid command that exits with code 1.
 	}
-	comp := New(cfg)
+	comp := New(cfg, nil)
 
 	// Fill the semaphore.
 	comp.semaphore <- struct{}{}

@@ -61,15 +61,33 @@ services:
       # Set to "true" when behind a reverse proxy (nginx, Cloudflare, etc.).
       # Default: false (uses direct TCP connection address).
       - TRUST_PROXY=false
+
+      # Compile cache (Redis). Identical (code, board) requests are served from
+      # cache instead of re-running arduino-cli — a big CPU/latency win for the
+      # most-compiled sketches. Reachable only on the internal compose network.
+      - REDIS_URL=redis://redis:6379
+
+      # Bump this whenever you re-provision arduino-cli cores/libraries, so
+      # binaries cached under the old toolchain are no longer served.
+      - CACHE_VERSION=v1
+
+      # How long a cached binary lives, in seconds. Default 14 days.
+      - CACHE_TTL=1209600
     restart: unless-stopped
 
-    # Resource limits tuned for a 1GB RAM VPS.
-    # The OS and Docker daemon need ~200-300MB, leaving ~700-800MB for the container.
+    # The compiler degrades gracefully if Redis is missing, but order startup so
+    # the cache is ready first on a normal boot.
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    # Resource limits tuned for a 1GB RAM VPS, now sharing the box with Redis.
+    # Budget: OS+Docker ~250MB, Redis ~150MB, leaving ~600MB for the compiler.
     deploy:
       resources:
         limits:
           cpus: "1.0"
-          memory: 768M
+          memory: 600M
         reservations:
           cpus: "0.5"
           memory: 256M
@@ -86,6 +104,51 @@ services:
       start_period: 900s
 
     # Logging configuration to prevent unbounded log growth.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Redis — compile cache.
+  #
+  # Holds compiled binaries keyed by (code, board). Configured as a pure cache:
+  #   --maxmemory 128mb            cap RAM use on the 1GB box
+  #   --maxmemory-policy allkeys-lru  evict least-recently-used binaries when full
+  #   --save "" --appendonly no    NO persistence — if Redis restarts the cache
+  #                                just rebuilds from real compiles; saves disk + CPU
+  #
+  # Not exposed to the host: no `ports:` mapping, so it's reachable only from
+  # the compiler over the internal compose network.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: arduino-compiler-redis
+    command:
+      - redis-server
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          # A touch above maxmemory to allow for Redis's own overhead.
+          memory: 160M
+        reservations:
+          memory: 64M
     logging:
       driver: json-file
       options:

@@ -106,6 +106,8 @@ type healthResponse struct {
 	ArduinoCLI     string `json:"arduino_cli"`
 	InstalledCores string `json:"installed_cores"`
 	Uptime         string `json:"uptime"`
+	CacheHits      uint64 `json:"cache_hits"`
+	CacheMisses    uint64 `json:"cache_misses"`
 }
 
 // serverStartTime records when the server was initialized, for uptime reporting.
@@ -146,6 +148,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	} else {
 		resp.InstalledCores = cores
 	}
+
+	// Cache effectiveness — watch the hit:miss ratio climb as popular sketches
+	// get cached.
+	resp.CacheHits, resp.CacheMisses = s.compiler.CacheStats()
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -281,10 +287,15 @@ func (s *Server) handleCompile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return the compiled binary.
+	cacheStatus := "MISS"
+	if result.Cached {
+		cacheStatus = "HIT"
+	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, result.Filename))
 	w.Header().Set("X-Board-Name", result.BoardName)
 	w.Header().Set("X-Filename", result.Filename)
+	w.Header().Set("X-Cache", cacheStatus)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(result.Binary)))
 	w.WriteHeader(http.StatusOK)
 

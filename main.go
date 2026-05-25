@@ -34,7 +34,9 @@ package main
 
 import (
 	"log"
+	"time"
 
+	"github.com/derivative-cli/arduino-compiler/internal/cache"
 	"github.com/derivative-cli/arduino-compiler/internal/compiler"
 	"github.com/derivative-cli/arduino-compiler/internal/config"
 	"github.com/derivative-cli/arduino-compiler/internal/server"
@@ -44,8 +46,25 @@ func main() {
 	// Load configuration from environment variables.
 	cfg := config.Load()
 
+	// Set up the compile cache. Redis is optional and best-effort: if REDIS_URL
+	// is unset or the server is unreachable at boot, we fall back to a no-op
+	// cache and compilations work exactly as before — just without caching.
+	var compileCache cache.Cache = cache.NewNoop()
+	if cfg.RedisURL != "" {
+		c, err := cache.NewRedis(cfg.RedisURL, 3*time.Second)
+		if err != nil {
+			log.Printf("[WARN] Compile cache disabled — Redis unavailable: %v", err)
+		} else {
+			log.Printf("[INFO] Compile cache enabled (Redis %s, TTL %v, namespace %q)",
+				cfg.RedisURL, cfg.CacheTTL, cfg.CacheVersion)
+			compileCache = c
+		}
+	} else {
+		log.Printf("[INFO] Compile cache disabled (REDIS_URL not set)")
+	}
+
 	// Initialize the compiler (wraps arduino-cli).
-	comp := compiler.New(cfg)
+	comp := compiler.New(cfg, compileCache)
 
 	// Check that arduino-cli is available. This is not fatal — the health
 	// endpoint will report "degraded" status, and compile requests will fail

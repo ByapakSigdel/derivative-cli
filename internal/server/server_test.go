@@ -25,7 +25,7 @@ func testServer() *Server {
 		AllowedOrigins:            "*",
 		TrustProxy:                false,
 	}
-	comp := compiler.New(cfg)
+	comp := compiler.New(cfg, nil)
 	return New(cfg, comp)
 }
 
@@ -207,7 +207,7 @@ func TestCORSHeaders(t *testing.T) {
 			AllowedOrigins:            "http://allowed.com",
 			TrustProxy:                false,
 		}
-		comp := compiler.New(cfg)
+		comp := compiler.New(cfg, nil)
 		restrictedSrv := New(cfg, comp)
 
 		req := httptest.NewRequest(http.MethodGet, "/health", nil)

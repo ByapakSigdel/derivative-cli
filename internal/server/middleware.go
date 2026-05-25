@@ -119,9 +119,9 @@ func corsMiddleware(allowedOrigins string) func(http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Max-Age", "86400") // 24 hours
 				// Expose custom response headers so browser JS can read them.
 				// Without this, Content-Disposition, X-Board-Name, X-Filename,
-				// and Content-Length are invisible to frontend JavaScript.
+				// X-Cache, and Content-Length are invisible to frontend JavaScript.
 				w.Header().Set("Access-Control-Expose-Headers",
-					"Content-Disposition, X-Board-Name, X-Filename, Content-Length")
+					"Content-Disposition, X-Board-Name, X-Filename, X-Cache, Content-Length")
 			}
 
 			// Handle preflight requests.

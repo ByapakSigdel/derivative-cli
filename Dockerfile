@@ -31,10 +31,15 @@ WORKDIR /app
 
 # Copy dependency files first to leverage Docker layer caching.
 COPY go.mod go.sum ./
-RUN go mod download
+RUN go mod download || true
 
 # Copy the rest of the source code.
 COPY . .
+
+# Ensure the module graph + go.sum are complete and consistent before building.
+# `go mod tidy` resolves any dependency (e.g. the Redis client) whose checksums
+# aren't yet committed to go.sum, so the build is self-sufficient.
+RUN go mod tidy
 
 # Build a statically-linked binary for the target platform.
 RUN CGO_ENABLED=0 go build \

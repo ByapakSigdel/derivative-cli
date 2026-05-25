@@ -14,13 +14,16 @@ package compiler
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
+	"github.com/derivative-cli/arduino-compiler/internal/cache"
 	"github.com/derivative-cli/arduino-compiler/internal/config"
 )
 
@@ -75,21 +78,63 @@ type CompileResult struct {
 
 	// BoardName is the human-readable name of the target board.
 	BoardName string
+
+	// Cached is true when Binary was served from the cache rather than freshly
+	// compiled. The handler surfaces this as the X-Cache response header.
+	Cached bool
 }
 
 // Compiler manages Arduino sketch compilations using arduino-cli.
 type Compiler struct {
 	cfg       *config.Config
 	semaphore chan struct{} // Limits concurrent compilations.
+	cache     cache.Cache
+
+	// Observability counters (lifetime totals), exposed via CacheStats.
+	cacheHits   atomic.Uint64
+	cacheMisses atomic.Uint64
 }
 
-// New creates a new Compiler with the given configuration.
-// The semaphore channel is sized to cfg.MaxConcurrentCompilations.
-func New(cfg *config.Config) *Compiler {
+// New creates a new Compiler with the given configuration and compile cache.
+// The semaphore channel is sized to cfg.MaxConcurrentCompilations. Pass a nil
+// cache to disable caching (a no-op cache is substituted).
+func New(cfg *config.Config, c cache.Cache) *Compiler {
+	if c == nil {
+		c = cache.NewNoop()
+	}
 	return &Compiler{
 		cfg:       cfg,
 		semaphore: make(chan struct{}, cfg.MaxConcurrentCompilations),
+		cache:     c,
 	}
+}
+
+// CacheStats returns the lifetime cache hit and miss counts.
+func (c *Compiler) CacheStats() (hits, misses uint64) {
+	return c.cacheHits.Load(), c.cacheMisses.Load()
+}
+
+// cacheKey derives a stable, collision-resistant key from the board + code.
+// The CacheVersion prefix lets us invalidate the whole cache when the toolchain
+// changes (see config.Config.CacheVersion).
+func (c *Compiler) cacheKey(board, code string) string {
+	h := sha256.New()
+	h.Write([]byte(board))
+	h.Write([]byte{0}) // separator so board||code can't collide across the boundary
+	h.Write([]byte(code))
+	return fmt.Sprintf("compile:%s:%x", c.cfg.CacheVersion, h.Sum(nil))
+}
+
+// filenameForBoard returns the download filename for a board's compiled output.
+// AVR boards emit Intel HEX; ESP boards emit raw binary. This mirrors the
+// extension logic in findCompiledBinary and lets a cache hit reconstruct the
+// filename without storing it alongside the binary.
+func filenameForBoard(fqbn string) string {
+	if strings.HasPrefix(fqbn, "esp32:") || strings.HasPrefix(fqbn, "esp8266:") {
+		return "sketch.bin"
+	}
+	// AVR (and any other supported board) produces .hex.
+	return "sketch.hex"
 }
 
 // Compile compiles the given Arduino sketch code for the specified board.
@@ -116,6 +161,22 @@ func (c *Compiler) Compile(ctx context.Context, req CompileRequest) (*CompileRes
 			Message: fmt.Sprintf("unsupported board FQBN: %q. Use GET /api/boards for supported boards", req.Board),
 		}
 	}
+
+	// --- Cache lookup (before the semaphore) ---
+	// A hit lets us skip both arduino-cli and the concurrency semaphore, so a
+	// cached request is served instantly even while a real compile holds the
+	// only slot. We look up after validation so we never key on bad input.
+	cacheKey := c.cacheKey(req.Board, req.Code)
+	if cached, hit := c.cache.Get(ctx, cacheKey); hit {
+		c.cacheHits.Add(1)
+		return &CompileResult{
+			Binary:    cached,
+			Filename:  filenameForBoard(req.Board),
+			BoardName: boardName,
+			Cached:    true,
+		}, nil
+	}
+	c.cacheMisses.Add(1)
 
 	// --- Acquire semaphore (non-blocking) ---
 	select {
@@ -218,6 +279,14 @@ func (c *Compiler) Compile(ctx context.Context, req CompileRequest) (*CompileRes
 			Message: fmt.Sprintf("compilation succeeded but failed to read output: %v", err),
 		}
 	}
+
+	// --- Store in cache (best-effort) ---
+	// Only successful binaries are cached. Use a detached, short-lived context
+	// so a slow SET can't extend the request and a client disconnect (which
+	// cancels ctx) can't abort writing a binary we already built.
+	storeCtx, storeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer storeCancel()
+	c.cache.Set(storeCtx, cacheKey, binary, c.cfg.CacheTTL)
 
 	return &CompileResult{
 		Binary:    binary,

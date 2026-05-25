@@ -64,6 +64,27 @@ type Config struct {
 	// Environment variable: TRUST_PROXY
 	// Default: false
 	TrustProxy bool
+
+	// RedisURL is the connection URL for the compile cache (e.g.
+	// "redis://redis:6379"). When empty, caching is disabled and every request
+	// is compiled from scratch.
+	// Environment variable: REDIS_URL
+	// Default: "" (caching disabled)
+	RedisURL string
+
+	// CacheTTL is how long a compiled binary stays in the cache before
+	// expiring. LRU eviction may remove it sooner under memory pressure.
+	// Environment variable: CACHE_TTL (in seconds)
+	// Default: 1209600 (14 days)
+	CacheTTL time.Duration
+
+	// CacheVersion namespaces cache keys. A cached binary is only valid for the
+	// exact toolchain that produced it, so BUMP THIS (e.g. "v1" -> "v2")
+	// whenever you re-provision arduino-cli cores or libraries — old entries
+	// then expire on their own instead of being served stale.
+	// Environment variable: CACHE_VERSION
+	// Default: "v1"
+	CacheVersion string
 }
 
 // Load reads configuration from environment variables and returns a Config
@@ -94,6 +115,12 @@ func Load() *Config {
 		compileTimeout = 10
 	}
 
+	cacheTTL := getEnvInt("CACHE_TTL", 1209600) // 14 days.
+	if cacheTTL < 60 {
+		log.Printf("[WARN] CACHE_TTL=%d is too short, using minimum of 60 seconds", cacheTTL)
+		cacheTTL = 60
+	}
+
 	return &Config{
 		Port:                      getEnv("PORT", "8080"),
 		MaxConcurrentCompilations: maxConcurrent,
@@ -103,6 +130,9 @@ func Load() *Config {
 		ArduinoCLIPath:            getEnv("ARDUINO_CLI_PATH", "arduino-cli"),
 		AllowedOrigins:            getEnv("ALLOWED_ORIGINS", "*"),
 		TrustProxy:                getEnvBool("TRUST_PROXY", false),
+		RedisURL:                  getEnv("REDIS_URL", ""),
+		CacheTTL:                  time.Duration(cacheTTL) * time.Second,
+		CacheVersion:              getEnv("CACHE_VERSION", "v1"),
 	}
 }
 
