@@ -74,53 +74,15 @@ echo "=== Installed Cores ==="
 "$CLI" core list
 
 # ---------------------------------------------------------------------------
-# External Arduino libraries.
+# External Arduino libraries are NOT installed here anymore.
 #
-# The visual editor can emit sketches that #include these. arduino-cli's
-# `compile` automatically picks up libraries installed here (into the user
-# libraries dir), so baking them into the image means library-dependent
-# sketches compile with no per-request network installs.
-#
-# This list MUST stay in sync with requiredCliLibraries() in
-# Derivative/lib/blocks/libraryRegistry.ts. If you add a block that needs a
-# new library, add its arduino-cli name here too.
-#
-# Built-in (ship with the core, NOT installed here): Servo, Wire,
-# SoftwareSerial.
-echo ""
-echo "--- Updating library index ---"
-"$CLI" lib update-index
-
-echo ""
-echo "--- Installing external libraries ---"
-# Each install is best-effort: one library being temporarily unavailable
-# (or a slightly renamed index entry) shouldn't abort the whole provision
-# and leave the cores half-done. Missing libs just mean the matching block
-# won't compile until fixed.
-install_lib() {
-  "$CLI" lib install "$1" || echo "[warn] failed to install library: $1"
-}
-# Adafruit DHT (+ its Unified Sensor dependency).
-install_lib "DHT sensor library"
-install_lib "Adafruit Unified Sensor"
-# 16x2 I2C LCD.
-install_lib "LiquidCrystal I2C"
-# OLED SSD1306 (+ GFX; BusIO is pulled in as a dependency).
-install_lib "Adafruit GFX Library"
-install_lib "Adafruit SSD1306"
-# GPS (NEO-6M / NEO-8M).
-install_lib "TinyGPSPlus"
-# MPU6050 accelerometer + gyroscope (Electronic Cats).
-install_lib "MPU6050"
-# Real-time clock (Adafruit) — DS1307 / DS3231 / PCF8523 share the API.
-install_lib "RTClib"
-# WS2812B / SK6812 addressable RGB LED strips.
-install_lib "Adafruit NeoPixel"
-
-echo ""
-echo "=== Installed Libraries ==="
-"$CLI" lib list
-
+# This script is marker-gated by docker-entrypoint.sh — it runs only on the
+# first boot. Libraries, however, get added over time as new blocks ship, and
+# they need to install on an already-provisioned volume without re-downloading
+# the multi-GB cores. So library provisioning lives in install-libs.sh, which
+# the entrypoint runs on EVERY start and installs only what is missing.
+# (Keeping the library list there also keeps it next to the sync note for
+# requiredCliLibraries() in Derivative/lib/blocks/libraryRegistry.ts.)
 # ---------------------------------------------------------------------------
 # Prune the data dir to keep the volume small. Removes things never needed
 # for compilation (debuggers, on-chip-flash tools, docs/examples, oversized

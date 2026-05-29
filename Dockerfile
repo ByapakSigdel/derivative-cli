@@ -60,6 +60,7 @@ RUN useradd --create-home --shell /bin/bash appuser
 # are downloaded at first start by docker-entrypoint.sh.
 # python3 is required by ESP32/ESP8266 build tools; git by some lib managers.
 COPY scripts/install-cores.sh /usr/local/bin/install-cores.sh
+COPY scripts/install-libs.sh /usr/local/bin/install-libs.sh
 COPY scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -73,7 +74,7 @@ RUN apt-get update && \
     && curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | \
        BINDIR=/usr/local/bin sh \
     && arduino-cli version \
-    && chmod +x /usr/local/bin/install-cores.sh /usr/local/bin/docker-entrypoint.sh \
+    && chmod +x /usr/local/bin/install-cores.sh /usr/local/bin/install-libs.sh /usr/local/bin/docker-entrypoint.sh \
     # Pre-create the data dir owned by appuser. When a fresh named volume is
     # mounted here, Docker seeds it with this dir's ownership, so the runtime
     # provisioning (running as appuser) can write into the volume.
