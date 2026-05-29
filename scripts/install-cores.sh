@@ -114,6 +114,8 @@ install_lib "TinyGPSPlus"
 install_lib "MPU6050"
 # Real-time clock (Adafruit) — DS1307 / DS3231 / PCF8523 share the API.
 install_lib "RTClib"
+# WS2812B / SK6812 addressable RGB LED strips.
+install_lib "Adafruit NeoPixel"
 
 echo ""
 echo "=== Installed Libraries ==="
