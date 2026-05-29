@@ -20,8 +20,9 @@
 # Derivative/lib/blocks/libraryRegistry.ts. If you add a block that needs a new
 # arduino-cli library, add its registry name here too.
 #
-# Built-in (ship with a core, NOT listed here): Servo, Wire, SoftwareSerial,
-# Stepper, LiquidCrystal.
+# Genuinely bundled with the avr core (NOT listed here): Wire, SoftwareSerial,
+# SPI, EEPROM. NOTE: Servo and Stepper are Arduino-maintained libraries that are
+# NOT in the core — they must be installed, so they ARE listed below.
 #
 # Environment:
 #   ARDUINO_CLI_PATH  — Path to arduino-cli binary (default: arduino-cli)
@@ -34,6 +35,8 @@ CLI="${ARDUINO_CLI_PATH:-arduino-cli}"
 
 # arduino-cli registry names of every library a generated sketch may #include.
 LIBS=(
+  "Servo"
+  "Stepper"
   "DHT sensor library"
   "Adafruit Unified Sensor"
   "LiquidCrystal I2C"
