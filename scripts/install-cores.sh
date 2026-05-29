@@ -112,6 +112,8 @@ install_lib "Adafruit SSD1306"
 install_lib "TinyGPSPlus"
 # MPU6050 accelerometer + gyroscope (Electronic Cats).
 install_lib "MPU6050"
+# Real-time clock (Adafruit) — DS1307 / DS3231 / PCF8523 share the API.
+install_lib "RTClib"
 
 echo ""
 echo "=== Installed Libraries ==="
