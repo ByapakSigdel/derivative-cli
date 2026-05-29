@@ -558,12 +558,47 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
-        # Compilation can take a while
-        proxy_read_timeout 180s;
-        proxy_send_timeout 180s;
+        # Compilation can take a while — these MUST exceed COMPILE_TIMEOUT (180s)
+        # or nginx cuts the connection and returns 502/504 on slow compiles.
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 200s;
+        proxy_send_timeout 200s;
     }
 }
 ```
+
+A complete, copy-pasteable config (TLS, keepalive, the timeout rationale) lives at
+[`deploy/nginx-compiler.conf`](deploy/nginx-compiler.conf).
+
+### Troubleshooting: 502 Bad Gateway on compile
+
+A 502/503/504 means nginx couldn't get a valid response from the Go upstream.
+The editor surfaces this as *"Invalid response from compile server"*. Two
+distinct causes, distinguished by **how fast** the error comes back:
+
+- **Slow 502/504 (tens of seconds, only on heavy/library sketches):** the
+  compile outran nginx's `proxy_read_timeout`. Fix: raise the proxy timeouts
+  above `COMPILE_TIMEOUT` (see the config above). Trivial sketches still work
+  because they finish before the timeout.
+
+- **Fast 502 (immediate, while a trivial blink still works):** the upstream was
+  *down or restarting* when the request arrived — not slow. A cached blink hit
+  needs no compile so it keeps working, masking that real compiles are killing
+  the service. Check, in order:
+  1. **Was the image rebuilt + container restarted** after a library was added?
+     Libraries install on restart via `install-libs.sh`; confirm with
+     `docker exec arduino-compiler arduino-cli lib list`.
+  2. **OOM kill** — a heavy compile exceeding the container memory limit:
+     `docker inspect arduino-compiler --format '{{.State.OOMKilled}}'` and
+     `dmesg | grep -i oom`. If so, lower `MAX_CONCURRENT_COMPILATIONS` (already
+     `1` in compose) or raise the `memory:` limit in `docker-compose.yml` if the
+     host has spare RAM.
+  3. **Provisioning window** — right after a redeploy the entrypoint installs
+     any missing libraries before the server starts; requests during that
+     (one-time) minute get a fast 502. It clears once provisioning finishes.
+
+The editor's compile proxy retries fast gateway errors a few times before
+giving up, so a brief restart window self-heals without a user-visible failure.
 
 ### Resource Requirements
 
